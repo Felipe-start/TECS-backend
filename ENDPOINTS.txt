@@ -1,0 +1,126 @@
+**API Endpoints**
+- **Base URL**: `http://localhost:3000/api`
+
+**Autenticación (Auth)**
+- **POST /auth/register**: Registrar usuario. Público. Body: `{ email, password, nombreCompleto, telefono, institucion, role, adminKey?, numeroTrabajador? }`.
+- **POST /auth/login**: Login. Público. Body: `{ email, password }`. Respuesta incluye `token` (JWT) y datos de usuario.
+- **GET /auth/profile**: Obtener perfil del usuario autenticado. Auth requerida.
+- **PUT /auth/profile**: Actualizar datos del perfil. Auth requerida.
+- **PUT /auth/change-password**: Cambiar contraseña. Auth requerida.
+- **PUT /auth/avatar**: Actualizar avatar. Auth requerida.
+- **GET /auth/avatar/:userId**: Obtener avatar público por `userId`.
+- **GET /auth/user**: (admin) Obtener todos los usuarios.
+- **PUT /auth/update-role/:userId**: (admin) Actualizar rol de un usuario.
+- **DELETE /auth/users/:userId**: (admin) Eliminar usuario.
+
+**Careers (Carreras)**
+- **GET /careers/available**: Listar carreras disponibles (público).
+- **GET /careers/my-careers**: Listar carreras del usuario autenticado. Auth requerida.
+- **GET /careers/:id**: Obtener carrera por ID. Auth requerida (admin o propietario).
+- **POST /careers**: Crear carrera. Auth requerida. Body: `{ nombre, numeroCarrera, cantidadAlumnos?, duracionSemestres?, modalidad?, turno?, descripcion?, activa?, poblacionEsperada?, poblacionReal?, logo? }`.
+- **PUT /careers/:id**: Actualizar carrera. Auth requerida (admin o propietario).
+- **DELETE /careers/:id**: Eliminar carrera. Auth requerida (admin o propietario).
+- **GET /careers/search?search=...**: Buscar carreras. Auth requerida.
+- **PUT /careers/metrics**: Actualizar métricas de carrera (body contiene `id` y métricas). Auth requerida.
+- **PUT /careers/:id/logo**: Actualizar logo (base64). Auth requerida.
+- **GET /careers/export/excel**: Exportar a Excel. Auth requerida.
+- **GET /careers/export/json**: Exportar a JSON. Auth requerida.
+
+**Institutions (Instituciones)**
+- **GET /institutions/my-institutions**: Listar instituciones del usuario autenticado. Auth requerida.
+- **GET /institutions/:id**: Obtener institución por ID. Auth requerida (admin o propietario).
+- **POST /institutions**: Crear institución. Auth requerida. Body: `{ nombre, claveCCT, telefono?, correo?, nombreRepresentante?, puestoRepresentante?, direccion?, logo?, estado? }`.
+- **PUT /institutions/:id**: Actualizar institución. Auth requerida (admin o propietario).
+- **DELETE /institutions/:id**: Eliminar institución. Auth requerida (admin o propietario).
+- **GET /institutions/search?search=...**: Buscar instituciones. Auth requerida.
+- **GET /institutions/all**: (admin) Obtener todas las instituciones.
+- **GET /institutions/stats**: (admin) Estadísticas de instituciones.
+- **GET /institutions/diagnostic**: Obtener diagnóstico (según implementación).
+
+**Relación Institución-Carrera**
+- **POST /institutions/institution-careers**: Asignar carrera a institución. Auth requerida.
+- **GET /institutions/institution-careers**: Listar relaciones institución-carrera. Auth requerida.
+
+**Descargas / Exportación (Instituciones)**
+- **GET /institutions/download/json**: Descargar instituciones en JSON. Auth requerida.
+- **GET /institutions/download/excel**: Descargar instituciones en Excel. Auth requerida.
+- **GET /institutions/download/complete/json**: Descargar datos completos en JSON. Auth requerida.
+- **GET /institutions/download/complete/excel**: Descargar datos completos en Excel. Auth requerida.
+- **GET /institutions/download-example-excel**: Descargar ejemplo de Excel para importación. Auth requerida.
+
+**Notas sobre Autenticación y Headers**
+- El backend acepta dos métodos de autenticación:
+  - **JWT Bearer**: Enviar header `Authorization: Bearer <token>` (recomendado para producción).
+  - **Headers legacy**: `user-id` y `user-email` (útil para pruebas o integración rápida).
+- Si no se proporciona ninguna, se devuelve `401 No autenticado`.
+
+**Ejemplos (cURL)**
+- Login y usar token:
+  ```bash
+  curl -X POST http://localhost:3000/api/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"email":"admin@tec.com","password":"1234"}'
+  # Respuesta contiene "token"
+  curl -X GET http://localhost:3000/api/careers/my-careers \
+    -H "Authorization: Bearer <token>"
+  ```
+
+- Usar headers legacy:
+  ```bash
+  curl -X GET http://localhost:3000/api/institutions/my-institutions \
+    -H "user-id: 1" \
+    -H "user-email: admin@tec.com"
+  ```
+
+**Observaciones**
+- Asegúrate de que los nombres de campos usados por el frontend coincidan con los esperados por el backend (`numeroCarrera` ↔ `numero_carrera`, `claveCCT` ↔ `clave_cct`, etc.).
+- Para producción, habilita `process.env.JWT_SECRET` y usa bcrypt en registro/login.
+
+---
+Archivo generado: `ENDPOINTS.txt` (ubicado en la raíz del proyecto `./ENDPOINTS.txt`).
+
+**Descripción del proyecto y cómo trabaja**
+
+- **Qué es:**
+  Este proyecto es el backend para un sistema de gestión de instituciones educativas y sus carreras (TECS). Provee APIs REST para gestionar usuarios, instituciones y carreras, incluyendo relaciones institución-carrera, exportación de datos y estadísticas.
+
+- **Stack tecnológico:**
+  - Node.js + Express
+  - MySQL (`mysql2`) con pool de conexiones
+  - Autenticación opcional con JWT (recomendada) y compatibilidad con cabeceras legacy (`user-id`, `user-email`) para integración rápida
+  - Librerías auxiliares: `bcryptjs` (hash de contraseñas en modelos), `xlsx` para exportar a Excel
+
+- **Estructura general:**
+  - `index.js`: punto de entrada del servidor, configuración de CORS, conexión a MySQL y rutas principales.
+  - `routes/`: define las rutas por entidad (`auth`, `careers`, `institutions`).
+  - `controllers/`: lógica de negocio y validaciones por endpoint.
+  - `models/`: acceso a la base de datos (queries parametrizadas, promesas).
+  - `config/database.js`: configuración de conexión (pool) a MySQL.
+
+- **Flujo de autenticación y permisos:**
+  - El middleware acepta `Authorization: Bearer <token>` (JWT) o `user-id` + `user-email` en headers.
+  - Cuando se autentica, se añade `req.user = { userId, email, role, username }` para que los controladores determinen permisos.
+  - Roles: `admin` tiene acceso total; `user` solo puede crear/editar/ver/eliminar sus propias instituciones y carreras. Hay validaciones de negocio, por ejemplo, usuarios normales solo pueden tener una institución.
+
+- **Base de datos:**
+  - El esquema principal está en `tec_system.sql` (tablas: `users`, `institutions`, `careers`, `institution_careers`, vistas y triggers).
+  - Validaciones de unicidad (email, numero_trabajador, clave_cct, numero_carrera) se respetan en modelos y controladores.
+
+- **Cómo correr localmente (rápido):**
+  1. Copia `.env.example` a `.env` y configura `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `PORT`, y opcionalmente `JWT_SECRET`.
+  2. Instala dependencias:
+     ```bash
+     npm install
+     ```
+  3. Inicia el servidor:
+     ```bash
+     npm run start
+     ```
+  4. Accede a las APIs en `http://localhost:3000/api`.
+
+- **Notas y buenas prácticas:**
+  - Para producción, configura `JWT_SECRET` en variables de entorno y fuerza uso de bcrypt al registrar/validar contraseñas.
+  - Mantén consistencia de nombres entre frontend y backend (p. ej. `numeroCarrera` ↔ `numero_carrera`).
+  - Usa el endpoint de login para obtener el `token` y añade `Authorization: Bearer <token>` a las peticiones protegidas.
+
+---

@@ -1,336 +1,445 @@
-const Career = require('../models/Career');
 const db = require('../config/database');
 
-const careerController = {
-  getCareers: async (req, res) => {
-    try {
-      console.log('✅ GET /api/careers called');
-      const careers = await Career.findAll();
-      res.json({
-        success: true,
-        data: careers
-      });
-    } catch (error) {
-      console.error('Error getting careers:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error retrieving careers'
-      });
-    }
-  },
-
-  getCareerById: async (req, res) => {
-    try {
-      const { id } = req.params;
-      console.log(`✅ GET /api/careers/${id} called`);
-      const career = await Career.findById(id);
-      
-      if (!career) {
-        return res.status(404).json({
-          success: false,
-          message: 'Career not found'
-        });
-      }
-
-      res.json({
-        success: true,
-        data: career
-      });
-    } catch (error) {
-      console.error('Error getting career:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error retrieving career'
-      });
-    }
-  },
-
-  createCareer: async (req, res) => {
-    try {
-      const careerData = req.body;
-      console.log('✅ POST /api/careers called with:', careerData);
-      const newCareer = await Career.create(careerData);
-      
-      res.status(201).json({
-        success: true,
-        message: 'Career created successfully',
-        data: newCareer
-      });
-    } catch (error) {
-      console.error('Error creating career:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error creating career: ' + error.message
-      });
-    }
-  },
-
-  updateCareer: async (req, res) => {
-    try {
-      const { id } = req.params;
-      const careerData = req.body;
-
-      console.log('🔍 PUT /api/careers/:id');
-      console.log('📦 Body:', careerData);
-      console.log('🎯 ID:', id);
-
-      // Validar datos requeridos
-      if (!careerData.nombre || !careerData.numeroCarrera) {
-        return res.status(400).json({
-          success: false,
-          message: 'Faltan datos requeridos: nombre, numeroCarrera'
-        });
-      }
-
-      const query = `
-        UPDATE careers 
-        SET nombre = ?, numero_carrera = ?, cantidad_alumnos = ?, 
-            duracion_semestres = ?, modalidad = ?, turno = ?, 
-            descripcion = ?, activa = ?, poblacion_esperada = ?, 
-            poblacion_real = ?, updated_at = CURRENT_TIMESTAMP 
-        WHERE id = ?
-      `;
-      
-      const params = [
-        careerData.nombre,
-        careerData.numeroCarrera,
-        careerData.cantidadAlumnos || 0,
-        careerData.duracionSemestres || 8,
-        careerData.modalidad || 'Escolarizada',
-        careerData.turno || 'Matutino',
-        careerData.descripcion || '',
-        careerData.activa !== undefined ? careerData.activa : true,
-        careerData.poblacionEsperada || 0,
-        careerData.poblacionReal || 0,
-        id
-      ];
-
-      console.log('🎓 Ejecutando query:', query);
-      console.log('🎓 Parámetros:', params);
-      
-      db.execute(query, params, (err, results) => {
-        if (err) {
-          console.error('❌ Error updating career:', err);
-          return res.status(500).json({
-            success: false,
-            message: 'Error updating career: ' + err.message
-          });
-        }
-        
-        if (results.affectedRows === 0) {
-          return res.status(404).json({
-            success: false,
-            message: 'Career not found'
-          });
-        }
-        
-        // Obtener la carrera actualizada
-        const getQuery = 'SELECT * FROM careers WHERE id = ?';
-        db.execute(getQuery, [id], (err, careerResults) => {
-          if (err) {
-            console.error('❌ Error getting updated career:', err);
-            return res.status(500).json({
-              success: false,
-              message: 'Career updated but error retrieving data'
+class CareerController {
+    // ✅ OBTENER CARRERAS POR USUARIO
+    static async getByUser(req, res) {
+        try {
+            const userId = req.user.userId;
+            
+            console.log('🎓 Obteniendo carreras para usuario ID:', userId);
+            
+            const [careers] = await db.promise().query(
+                'SELECT * FROM careers WHERE user_id = ? ORDER BY created_at DESC',
+                [userId]
+            );
+            
+            console.log(`📊 Encontradas ${careers.length} carreras para usuario ${userId}`);
+            
+            res.json({
+                success: true,
+                data: careers,
+                count: careers.length
             });
-          }
-          
-          const updatedCareer = careerResults[0];
-          const mappedCareer = {
-            id: updatedCareer.id,
-            userId: updatedCareer.user_id,
-            nombre: updatedCareer.nombre,
-            numeroCarrera: updatedCareer.numero_carrera,
-            cantidadAlumnos: updatedCareer.cantidad_alumnos,
-            duracionSemestres: updatedCareer.duracion_semestres,
-            modalidad: updatedCareer.modalidad,
-            turno: updatedCareer.turno,
-            fechaRegistro: updatedCareer.fecha_registro || updatedCareer.created_at,
-            descripcion: updatedCareer.descripcion,
-            activa: updatedCareer.activa,
-            poblacionEsperada: updatedCareer.poblacion_esperada,
-            poblacionReal: updatedCareer.poblacion_real,
-            createdAt: updatedCareer.created_at
-          };
-          
-          console.log('✅ Carrera actualizada correctamente');
-          res.json({
-            success: true,
-            message: 'Career updated successfully',
-            data: mappedCareer
-          });
-        });
-      });
-    } catch (error) {
-      console.error('❌ Error in updateCareer:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Server error updating career'
-      });
-    }
-  },
-
-  // NUEVO MÉTODO: Actualizar solo métricas
-  updateCareerMetrics: async (req, res) => {
-    try {
-      const { id, poblacionEsperada, poblacionReal } = req.body;
-      
-      console.log('🔍 PUT /api/careers/metrics');
-      console.log('📦 Body:', req.body);
-
-      // Validar que tenemos los datos necesarios
-      if (!id || poblacionEsperada === undefined || poblacionReal === undefined) {
-        return res.status(400).json({
-          success: false,
-          message: 'Faltan datos requeridos: id, poblacionEsperada, poblacionReal'
-        });
-      }
-
-      const query = `
-        UPDATE careers 
-        SET poblacion_esperada = ?, poblacion_real = ?, updated_at = CURRENT_TIMESTAMP 
-        WHERE id = ?
-      `;
-      
-      console.log('🎓 Ejecutando query:', query);
-      console.log('🎓 Parámetros:', [poblacionEsperada, poblacionReal, id]);
-      
-      db.execute(query, [poblacionEsperada, poblacionReal, id], (err, results) => {
-        if (err) {
-          console.error('❌ Error updating career metrics:', err);
-          return res.status(500).json({
-            success: false,
-            message: 'Error updating career metrics: ' + err.message
-          });
+            
+        } catch (error) {
+            console.error('❌ Error obteniendo carreras:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error obteniendo carreras: ' + error.message
+            });
         }
-        
-        if (results.affectedRows === 0) {
-          return res.status(404).json({
-            success: false,
-            message: 'Career not found'
-          });
+    }
+
+    // ✅ OBTENER TODAS LAS CARRERAS (solo admin)
+    static async getAll(req, res) {
+        try {
+            const [careers] = await db.promise().query(`
+                SELECT c.*, u.username as propietario
+                FROM careers c
+                LEFT JOIN users u ON c.user_id = u.id
+                ORDER BY c.created_at DESC
+            `);
+            
+            res.json({
+                success: true,
+                data: careers,
+                count: careers.length
+            });
+            
+        } catch (error) {
+            console.error('❌ Error obteniendo todas las carreras:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error obteniendo carreras: ' + error.message
+            });
         }
-        
-        console.log('✅ Métricas actualizadas correctamente');
-        res.json({
-          success: true,
-          message: 'Career metrics updated successfully'
-        });
-      });
-    } catch (error) {
-      console.error('❌ Error in updateCareerMetrics:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Server error updating career metrics'
-      });
     }
-  },
 
-  deleteCareer: async (req, res) => {
-    try {
-      const { id } = req.params;
-      const result = await Career.delete(id);
-      
-      if (result.affectedRows === 0) {
-        return res.status(404).json({
-          success: false,
-          message: 'Career not found'
-        });
-      }
-
-      res.json({
-        success: true,
-        message: 'Career deleted successfully'
-      });
-    } catch (error) {
-      console.error('Error deleting career:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error deleting career'
-      });
-    }
-  },
-
-  getMyCareers: async (req, res) => {
-    try {
-      console.log('✅ GET /api/careers/my-careers called');
-      // Temporal: usar user ID 1 hasta implementar autenticación
-      const userId = 1;
-      const careers = await Career.findByUserId(userId);
-      
-      res.json({
-        success: true,
-        data: careers
-      });
-    } catch (error) {
-      console.error('Error getting my careers:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error retrieving careers'
-      });
-    }
-  },
-
-  getAvailableCareers: async (req, res) => {
-    try {
-      console.log('✅ GET /api/careers/available called');
-      const careers = await Career.findAvailable();
-      
-      res.json({
-        success: true,
-        data: careers
-      });
-    } catch (error) {
-      console.error('Error getting available careers:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error retrieving available careers'
-      });
-    }
-  },
-
-  // Método para obtener estadísticas de carreras
-  getCareerStatistics: async (req, res) => {
-    try {
-      const query = `
-        SELECT 
-          COUNT(*) as total_careers,
-          SUM(poblacion_esperada) as total_esperada,
-          SUM(poblacion_real) as total_real,
-          AVG(poblacion_real / NULLIF(poblacion_esperada, 0)) as promedio_cumplimiento
-        FROM careers 
-        WHERE user_id = ?
-      `;
-      
-      // Temporal: usar user ID 1
-      const userId = 1;
-      
-      db.execute(query, [userId], (err, results) => {
-        if (err) {
-          console.error('Error getting career statistics:', err);
-          return res.status(500).json({
-            success: false,
-            message: 'Error getting career statistics'
-          });
+    // ✅ CREAR CARRERA CON MÉTRICAS Y LOGO
+    static async create(req, res) {
+        try {
+            const userId = req.user.userId;
+            const {
+                nombre,
+                numeroCarrera,
+                cantidadAlumnos,
+                duracionSemestres,
+                modalidad,
+                turno,
+                descripcion,
+                activa,
+                poblacionEsperada,
+                poblacionReal,
+                logo
+            } = req.body;
+            
+            console.log('📝 Creando carrera para usuario:', userId);
+            console.log('📊 Datos recibidos:', req.body);
+            
+            // Validar campos requeridos
+            if (!nombre || !numeroCarrera) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Nombre y número de carrera son requeridos'
+                });
+            }
+            
+            // Verificar si ya existe el número de carrera
+            const [existing] = await db.promise().query(
+                'SELECT id FROM careers WHERE numero_carrera = ?',
+                [numeroCarrera]
+            );
+            
+            if (existing.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El número de carrera ya existe'
+                });
+            }
+            
+            // Insertar carrera con TODOS los campos
+            const [result] = await db.promise().query(
+                `INSERT INTO careers 
+                (user_id, nombre, numero_carrera, cantidad_alumnos, 
+                 duracion_semestres, modalidad, turno, fecha_registro, 
+                 descripcion, activa, poblacion_esperada, poblacion_real, logo) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?)`,
+                [
+                    userId, 
+                    nombre, 
+                    numeroCarrera, 
+                    cantidadAlumnos || 0, 
+                    duracionSemestres || 8,
+                    modalidad || 'Escolarizada',
+                    turno || 'Matutino',
+                    descripcion || '',
+                    activa !== undefined ? (activa ? 1 : 0) : 1,
+                    poblacionEsperada || 100,
+                    poblacionReal || 50,
+                    logo || null
+                ]
+            );
+            
+            // Obtener carrera creada
+            const [career] = await db.promise().query(
+                'SELECT * FROM careers WHERE id = ?',
+                [result.insertId]
+            );
+            
+            console.log('✅ Carrera creada exitosamente');
+            
+            res.status(201).json({
+                success: true,
+                message: 'Carrera creada exitosamente',
+                career: career[0]
+            });
+            
+        } catch (error) {
+            console.error('❌ Error creando carrera:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error creando carrera: ' + error.message
+            });
         }
-        
-        res.json({
-          success: true,
-          statistics: results[0]
-        });
-      });
-    } catch (error) {
-      console.error('Error in getCareerStatistics:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Server error getting career statistics'
-      });
     }
-  }
-};
 
-// VERIFICA QUE SE EXPORTA CORRECTAMENTE
-console.log('✅ careerController exportado correctamente');
-console.log('✅ Métodos disponibles:', Object.keys(careerController));
+    // ✅ OBTENER CARRERA POR ID
+    static async getById(req, res) {
+        try {
+            const { id } = req.params;
+            
+            const [careers] = await db.promise().query(
+                'SELECT * FROM careers WHERE id = ?',
+                [id]
+            );
+            
+            if (careers.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Carrera no encontrada'
+                });
+            }
+            
+            res.json({
+                success: true,
+                career: careers[0]
+            });
+            
+        } catch (error) {
+            console.error('❌ Error obteniendo carrera:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error obteniendo carrera: ' + error.message
+            });
+        }
+    }
 
-module.exports = careerController;
+    // ✅ ACTUALIZAR CARRERA COMPLETA
+    static async update(req, res) {
+        try {
+            const { id } = req.params;
+            const userId = req.user.userId;
+            const updateData = req.body;
+            
+            console.log(`✏️ Actualizando carrera ${id} para usuario ${userId}`);
+            console.log('📊 Datos para actualizar:', updateData);
+            
+            // Verificar que la carrera existe y pertenece al usuario
+            const [career] = await db.promise().query(
+                'SELECT * FROM careers WHERE id = ? AND user_id = ?',
+                [id, userId]
+            );
+            
+            if (career.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Carrera no encontrada o no tienes permisos'
+                });
+            }
+            
+            // Construir query de actualización
+            const fields = [];
+            const values = [];
+            
+            // Mapeo de campos frontend a backend
+            const fieldMappings = {
+                nombre: 'nombre',
+                numeroCarrera: 'numero_carrera',
+                cantidadAlumnos: 'cantidad_alumnos',
+                duracionSemestres: 'duracion_semestres',
+                modalidad: 'modalidad',
+                turno: 'turno',
+                descripcion: 'descripcion',
+                activa: 'activa',
+                poblacionEsperada: 'poblacion_esperada',
+                poblacionReal: 'poblacion_real',
+                logo: 'logo'
+            };
+            
+            for (const [frontendField, backendField] of Object.entries(fieldMappings)) {
+                if (updateData[frontendField] !== undefined) {
+                    fields.push(`${backendField} = ?`);
+                    
+                    // Manejar valores booleanos para activa
+                    if (frontendField === 'activa') {
+                        values.push(updateData[frontendField] ? 1 : 0);
+                    } else {
+                        values.push(updateData[frontendField]);
+                    }
+                }
+            }
+            
+            if (fields.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'No hay datos para actualizar'
+                });
+            }
+            
+            values.push(id, userId);
+            
+            const query = `UPDATE careers SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ? AND user_id = ?`;
+            
+            await db.promise().query(query, values);
+            
+            console.log('✅ Carrera actualizada exitosamente');
+            
+            res.json({
+                success: true,
+                message: 'Carrera actualizada exitosamente'
+            });
+            
+        } catch (error) {
+            console.error('❌ Error actualizando carrera:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error actualizando carrera: ' + error.message
+            });
+        }
+    }
+
+    // ✅ ACTUALIZAR SOLO MÉTRICAS DE CARRERA
+    static async updateMetrics(req, res) {
+        try {
+            const { id } = req.params;
+            const userId = req.user.userId;
+            const { poblacionEsperada, poblacionReal } = req.body;
+            
+            console.log(`📈 Actualizando métricas para carrera ${id}, usuario: ${userId}`);
+            console.log('📊 Datos recibidos:', { poblacionEsperada, poblacionReal });
+            
+            // Verificar que la carrera existe y pertenece al usuario
+            const [career] = await db.promise().query(
+                'SELECT id FROM careers WHERE id = ? AND user_id = ?',
+                [id, userId]
+            );
+            
+            if (career.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Carrera no encontrada o no tienes permisos'
+                });
+            }
+            
+            // Validar métricas
+            if (poblacionEsperada === undefined || poblacionReal === undefined) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Ambas métricas (poblacionEsperada y poblacionReal) son requeridas'
+                });
+            }
+            
+            // Actualizar métricas
+            await db.promise().query(
+                'UPDATE careers SET poblacion_esperada = ?, poblacion_real = ?, updated_at = NOW() WHERE id = ?',
+                [poblacionEsperada, poblacionReal, id]
+            );
+            
+            console.log('✅ Métricas actualizadas exitosamente');
+            
+            res.json({
+                success: true,
+                message: 'Métricas actualizadas exitosamente'
+            });
+            
+        } catch (error) {
+            console.error('❌ Error actualizando métricas:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error actualizando métricas: ' + error.message
+            });
+        }
+    }
+
+    // ✅ ELIMINAR CARRERA
+    static async delete(req, res) {
+        try {
+            const { id } = req.params;
+            const userId = req.user.userId;
+            
+            console.log(`🗑️ Eliminando carrera ${id} para usuario ${userId}`);
+            
+            // Verificar que la carrera existe y pertenece al usuario
+            const [career] = await db.promise().query(
+                'SELECT id FROM careers WHERE id = ? AND user_id = ?',
+                [id, userId]
+            );
+            
+            if (career.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Carrera no encontrada o no tienes permisos'
+                });
+            }
+            
+            // Eliminar relaciones primero
+            await db.promise().query(
+                'DELETE FROM institution_careers WHERE career_id = ?',
+                [id]
+            );
+            
+            // Eliminar carrera
+            await db.promise().query(
+                'DELETE FROM careers WHERE id = ?',
+                [id]
+            );
+            
+            console.log('✅ Carrera eliminada exitosamente');
+            
+            res.json({
+                success: true,
+                message: 'Carrera eliminada exitosamente'
+            });
+            
+        } catch (error) {
+            console.error('❌ Error eliminando carrera:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error eliminando carrera: ' + error.message
+            });
+        }
+    }
+
+    // ✅ OBTENER CARRERAS DISPONIBLES (sin autenticación)
+    static async getAvailable(req, res) {
+        try {
+            const [careers] = await db.promise().query(
+                'SELECT * FROM careers WHERE activa = 1 ORDER BY nombre'
+            );
+            
+            res.json({
+                success: true,
+                data: careers,
+                count: careers.length
+            });
+            
+        } catch (error) {
+            console.error('❌ Error obteniendo carreras disponibles:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error obteniendo carreras disponibles: ' + error.message
+            });
+        }
+    }
+
+    // ✅ OBTENER ESTADÍSTICAS DE CARRERAS
+    static async getStats(req, res) {
+        try {
+            const [stats] = await db.promise().query(`
+                SELECT 
+                    COUNT(*) as total_careers,
+                    SUM(CASE WHEN activa = 1 THEN 1 ELSE 0 END) as active_careers,
+                    SUM(CASE WHEN activa = 0 THEN 1 ELSE 0 END) as inactive_careers,
+                    SUM(poblacion_esperada) as total_poblacion_esperada,
+                    SUM(poblacion_real) as total_poblacion_real,
+                    AVG(poblacion_esperada) as promedio_esperada,
+                    AVG(poblacion_real) as promedio_real,
+                    modalidad,
+                    COUNT(*) as count_by_modalidad
+                FROM careers
+                GROUP BY modalidad
+            `);
+            
+            const [turnoStats] = await db.promise().query(`
+                SELECT turno, COUNT(*) as count_by_turno
+                FROM careers
+                GROUP BY turno
+            `);
+            
+            const totalEsperada = stats.reduce((sum, s) => sum + (s.total_poblacion_esperada || 0), 0);
+            const totalReal = stats.reduce((sum, s) => sum + (s.total_poblacion_real || 0), 0);
+            const porcentajeCumplimiento = totalEsperada > 0 ? (totalReal / totalEsperada) * 100 : 0;
+            
+            res.json({
+                success: true,
+                statistics: {
+                    totalCareers: stats.reduce((sum, s) => sum + s.total_careers, 0) || 0,
+                    activeCareers: stats.reduce((sum, s) => sum + s.active_careers, 0) || 0,
+                    inactiveCareers: stats.reduce((sum, s) => sum + s.inactive_careers, 0) || 0,
+                    totalPoblacionEsperada: totalEsperada,
+                    totalPoblacionReal: totalReal,
+                    promedioPoblacionEsperada: stats.reduce((sum, s) => sum + (s.promedio_esperada || 0), 0) / stats.length || 0,
+                    promedioPoblacionReal: stats.reduce((sum, s) => sum + (s.promedio_real || 0), 0) / stats.length || 0,
+                    porcentajeCumplimiento: porcentajeCumplimiento.toFixed(2),
+                    careersByModalidad: stats.reduce((obj, s) => {
+                        obj[s.modalidad] = s.count_by_modalidad;
+                        return obj;
+                    }, {}),
+                    careersByTurno: turnoStats.reduce((obj, s) => {
+                        obj[s.turno] = s.count_by_turno;
+                        return obj;
+                    }, {})
+                }
+            });
+            
+        } catch (error) {
+            console.error('❌ Error obteniendo estadísticas:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error obteniendo estadísticas: ' + error.message
+            });
+        }
+    }
+}
+
+module.exports = CareerController;
